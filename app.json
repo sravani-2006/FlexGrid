@@ -1,7 +1,8 @@
 {
   "expo": {
     "name": "FixGrid",
-    "slug": "FixGrid",
+    "slug": "fixgrid",
+    "scheme": "fixgrid",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -20,10 +21,34 @@
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
-      }
+      },
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow FixGrid to use your location to report issues accurately."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow FixGrid to access your photos to attach images to issue reports.",
+          "cameraPermission": "Allow FixGrid to access your camera to take photos of issues."
+        }
+      ],
+      "expo-font",
+      "expo-web-browser"
+    ]
   }
 }
