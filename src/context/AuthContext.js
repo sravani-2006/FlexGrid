@@ -2,11 +2,13 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import * as WebBrowser from 'expo-web-browser';
 import * as AuthSession from 'expo-auth-session';
 import * as QueryParams from 'expo-auth-session/build/QueryParams';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 
 WebBrowser.maybeCompleteAuthSession();
 
 const AuthContext = createContext();
+const LAST_ROLE_KEY = '@auth_last_role';
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
@@ -18,6 +20,7 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [session, setSession] = useState(null);
   const [role, setRole] = useState(null);
+  const [activePortal, setActivePortal] = useState(null);
   const [loading, setLoading] = useState(true);
   const [pendingRole, setPendingRole] = useState(null);
   const [profile, setProfile] = useState(null);
@@ -38,7 +41,8 @@ export const AuthProvider = ({ children }) => {
           avatar_url: data.avatar_url || user?.user_metadata?.avatar_url || 'https://images.unsplash.com/photo-1568602471122-7832951cc4c5?w=300&q=80',
           email: user?.email
         });
-        setRole(data.role);
+        // Do not auto-switch app portal role during simple profile refreshes.
+        // Role is resolved through session bootstrap/login flow.
       }
     } catch (e) {
       console.log('[AuthContext] Profile Fetch Err:', e);
@@ -74,16 +78,33 @@ export const AuthProvider = ({ children }) => {
     setUser(session?.user ?? null);
     
     if (session?.user) {
+      const isSameUser = user?.id && user.id === session.user.id;
+      const hasResolvedRole = !!role;
+
+      // Skip global loading refresh for token refresh/app resume when auth context is already ready.
+      if (isSameUser && hasResolvedRole) {
+        return;
+      }
+
+      setLoading(true);
       console.log('[AuthContext] User found, fetching profile role...');
-      await fetchProfile(session.user);
+      let savedRole = null;
+      try {
+        savedRole = await AsyncStorage.getItem(LAST_ROLE_KEY);
+        if (savedRole) setActivePortal(savedRole);
+      } catch (e) {
+        console.log('[AuthContext] Could not read saved role:', e?.message);
+      }
+      await fetchProfile(session.user, savedRole);
     } else {
       console.log('[AuthContext] No user found, clearing role.');
       setRole(null);
+      setActivePortal(null);
       setLoading(false);
     }
   };
 
-  const fetchProfile = async (userData) => {
+  const fetchProfile = async (userData, preferredRole = null) => {
     try {
       const { data, error } = await supabase
         .from('profiles')
@@ -96,19 +117,24 @@ export const AuthProvider = ({ children }) => {
       }
       
       if (data) {
-          console.log('[AuthContext] Profile found. Role is:', data.role, 'Pending Role is:', pendingRole);
+          console.log('[AuthContext] Profile found. Role is:', data.role, 'Pending Role is:', pendingRole, 'Preferred Role is:', preferredRole);
+          const roleToApply = preferredRole || pendingRole;
           
-          if (pendingRole && data.role !== pendingRole) {
-              console.log(`[AuthContext] Switching OAuth existing role to match portal: ${pendingRole}`);
-              await supabase.from('profiles').update({ role: pendingRole }).eq('id', userData.id);
-              setRole(pendingRole);
+          if (roleToApply && data.role !== roleToApply) {
+            console.log(`[AuthContext] Switching existing role to match portal: ${roleToApply}`);
+            await supabase.from('profiles').update({ role: roleToApply }).eq('id', userData.id);
+            await AsyncStorage.setItem(LAST_ROLE_KEY, roleToApply);
+            setActivePortal(roleToApply);
+            setRole(roleToApply);
               setPendingRole(null); // Clear it out
           } else {
+            await AsyncStorage.setItem(LAST_ROLE_KEY, data.role);
+            setActivePortal(preferredRole || pendingRole || data.role);
               setRole(data.role);
           }
       } else {
           console.log('[AuthContext] Profile not found. Provisioning for new OAuth user...');
-          await ensureProfile(userData, pendingRole || 'citizen');
+          await ensureProfile(userData, preferredRole || pendingRole || 'citizen');
           setPendingRole(null);
       }
     } catch (e) {
@@ -132,8 +158,10 @@ export const AuthProvider = ({ children }) => {
           if (profile.role !== requiredRole) {
               console.log(`[AuthContext] Switching existing role from ${profile.role} to ${requiredRole}`);
               await supabase.from('profiles').update({ role: requiredRole }).eq('id', userData.id);
+              await AsyncStorage.setItem(LAST_ROLE_KEY, requiredRole);
               setRole(requiredRole);
           } else {
+              await AsyncStorage.setItem(LAST_ROLE_KEY, profile.role);
               setRole(profile.role);
           }
       } else {
@@ -148,6 +176,7 @@ export const AuthProvider = ({ children }) => {
           if (upsertError) {
               console.error('[AuthContext] Failed to provision profile:', upsertError);
           } else {
+              await AsyncStorage.setItem(LAST_ROLE_KEY, requiredRole);
               setRole(requiredRole);
           }
       }
@@ -155,12 +184,16 @@ export const AuthProvider = ({ children }) => {
 
   const signIn = async (email, password, expectedRole = 'citizen') => {
     console.log('[AuthContext] Attempting SignIn for:', email);
+    setPendingRole(expectedRole); // Set pending role for email login too
+    setActivePortal(expectedRole);
+    await AsyncStorage.setItem(LAST_ROLE_KEY, expectedRole);
     const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
     });
     if (error) {
         console.error('[AuthContext] SignIn Error:', error.message);
+        setPendingRole(null);
         throw error;
     }
     
@@ -173,6 +206,9 @@ export const AuthProvider = ({ children }) => {
 
   const signUp = async (email, password, full_name, expectedRole = 'citizen') => {
     console.log('[AuthContext] Attempting SignUp for:', email);
+    setPendingRole(expectedRole); // Set pending role for signup too
+    setActivePortal(expectedRole);
+    await AsyncStorage.setItem(LAST_ROLE_KEY, expectedRole);
     const { data, error } = await supabase.auth.signUp({
         email,
         password,
@@ -183,10 +219,11 @@ export const AuthProvider = ({ children }) => {
 
     if (error) {
         console.error('[AuthContext] SignUp Error:', error.message);
+        setPendingRole(null);
         throw error;
     }
 
-    // Usually, signUp returns a user even before confirmation, or handles auto-login if confirmations are disabled
+    // Usually, signUp returns a user even before confirmation
     if (data?.user) {
        await ensureProfile(data.user, expectedRole);
     }
@@ -196,6 +233,8 @@ export const AuthProvider = ({ children }) => {
 
   const signInWithGoogle = async (role = 'citizen') => {
     setPendingRole(role);
+    setActivePortal(role);
+    await AsyncStorage.setItem(LAST_ROLE_KEY, role);
     const redirectUrl = AuthSession.makeRedirectUri();
 
     console.log("Redirect URL:", redirectUrl);
@@ -210,6 +249,7 @@ export const AuthProvider = ({ children }) => {
 
     if (error) {
       console.log("ERROR:", error.message);
+      setPendingRole(null);
       throw error;
     }
 
@@ -221,6 +261,7 @@ export const AuthProvider = ({ children }) => {
         const { params, errorCode } = QueryParams.getQueryParams(url);
 
         if (errorCode) {
+          setPendingRole(null);
           throw new Error(errorCode);
         }
 
@@ -233,10 +274,15 @@ export const AuthProvider = ({ children }) => {
           });
           
           if (sessionError) {
+             setPendingRole(null);
              throw sessionError;
           }
         }
+      } else {
+          setPendingRole(null);
       }
+    } else {
+        setPendingRole(null);
     }
   };
 
@@ -251,6 +297,7 @@ export const AuthProvider = ({ children }) => {
         user, 
         session, 
         role, 
+      activePortal,
         profile,
         loading, 
         signIn,
@@ -258,6 +305,7 @@ export const AuthProvider = ({ children }) => {
         signInWithGoogle,
         logout,
         setRole,
+        setActivePortal,
         refreshProfile
     }}>
       {children}

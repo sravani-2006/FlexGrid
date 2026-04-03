@@ -1,108 +1,75 @@
 import React, { useState } from 'react';
 import {
+  ActivityIndicator,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useTheme } from '../context/ThemeContext';
 import { useToast } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 import { mockIssues } from '../data/mockData';
+
+import { useVolunteerStats } from '../hooks/useVolunteerStats';
 
 const rewardBySeverity = { critical: 800, medium: 500, low: 300 };
 
-const resolvedIssues = mockIssues.filter((i) => i.status === 'resolved');
-
-const govRewards = resolvedIssues.slice(0, 3).map((i, idx) => ({
-  id: `gov-${idx}`,
-  title: i.title,
-  location: i.locationName || 'Unknown',
-  severity: i.severity,
-  amount: rewardBySeverity[i.severity] || 300,
-  date: '2026-03-20',
-  status: 'Credited',
-}));
-
-const publicRewards = resolvedIssues.slice(1, 3).map((i, idx) => ({
-  id: `pub-${idx}`,
-  title: i.title,
-  location: i.locationName || 'Unknown',
-  severity: i.severity,
-  amount: Math.round((rewardBySeverity[i.severity] || 300) * 0.4),
-  date: '2026-03-22',
-  status: idx === 0 ? 'Credited' : 'Pending',
-}));
-
-const leaderboard = [
-  { rank: 1, name: 'Priya Sharma', college: 'IIT Bombay', xp: 3200, badge: '🏆' },
-  { rank: 2, name: 'Arjun Mehta', college: 'NIT Trichy', xp: 2850, badge: '🥈' },
-  { rank: 3, name: 'Sana Iyer', college: 'BITS Pilani', xp: 2400, badge: '🥉' },
-  { rank: 4, name: 'You', college: 'FixGrid Campus', xp: 1950, badge: '⭐' },
-  { rank: 5, name: 'Rahul V.', college: 'VIT Vellore', xp: 1700, badge: '' },
-];
-
-const VolunteerRewardsScreen = () => {
+const VolunteerRewardsScreen = ({ navigation }) => {
   const { colors, typography } = useTheme();
   const { showToast } = useToast();
+  const { profile, refreshProfile } = useAuth();
+  const { stats, rewardHistory, leaderboard, loading, refresh } = useVolunteerStats();
   const [refreshing, setRefreshing] = useState(false);
-  const [claimedIds, setClaimedIds] = useState([]);
 
-  const totalEarned = [...govRewards, ...publicRewards]
-    .filter((r) => r.status === 'Credited')
-    .reduce((s, r) => s + r.amount, 0);
+  useFocusEffect(
+    React.useCallback(() => {
+      refreshProfile?.();
+    }, [refreshProfile])
+  );
 
   const onRefresh = async () => {
     setRefreshing(true);
     await Haptics.selectionAsync();
-    setTimeout(() => { setRefreshing(false); showToast('Rewards updated'); }, 700);
+    await refresh();
+    setRefreshing(false);
+    showToast('Rewards updated ✅');
   };
 
-  const claimReward = async (id, amount) => {
-    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    if (claimedIds.includes(id)) { showToast('Already claimed', 'info'); return; }
-    setClaimedIds((p) => [...p, id]);
-    showToast(`₹${amount} reward claimed! 🎉`);
-  };
-
-  const RewardCard = ({ item, source }) => {
-    const isClaimed = claimedIds.includes(item.id);
-    const isPending = item.status === 'Pending';
+  const RewardCard = ({ item }) => {
+    const rewardAmount = item.reward_value ?? item.reward ?? item.amount ?? item.points ?? item.xp ?? 0;
+    const statusRaw = item.reward_status ?? item.status ?? 'credited';
+    const normalizedStatus = String(statusRaw).toLowerCase();
+    const isPending = normalizedStatus === 'pending';
     return (
       <View style={[styles.rewardCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <View style={styles.rewardCardTop}>
           <View style={{ flex: 1 }}>
             <Text style={[styles.rewardTitle, { color: colors.text, fontFamily: typography.label }]} numberOfLines={2}>
-              {item.title}
+              {item.issue?.title || 'Mission Reward'}
             </Text>
             <Text style={[styles.rewardMeta, { color: colors.muted, fontFamily: typography.body }]}>
-              {item.location} · {item.date}
+              {item.issue?.location_name || 'Completed Task'} · {new Date(item.created_at).toLocaleDateString()}
             </Text>
           </View>
           <View style={styles.amountCol}>
-            <Text style={[styles.amountText, { color: source === 'gov' ? colors.primary : '#7C3AED', fontFamily: typography.heading }]}>
-              ₹{item.amount}
+            <Text style={[styles.amountText, { color: colors.primary, fontFamily: typography.heading }]}>
+              ₹{rewardAmount}
             </Text>
             <View style={[styles.statusPill, { backgroundColor: isPending ? '#FFF7ED' : '#F0FDF4' }]}>
               <Text style={[styles.statusPillText, { color: isPending ? '#C2410C' : '#15803D' }]}>
-                {isClaimed ? 'Claimed' : item.status}
+                {isPending ? 'Pending' : 'Credited'}
               </Text>
             </View>
           </View>
         </View>
-        {!isClaimed && !isPending && (
-          <TouchableOpacity
-            style={[styles.claimBtn, { backgroundColor: source === 'gov' ? colors.primary : '#7C3AED' }]}
-            onPress={() => claimReward(item.id, item.amount)}
-          >
-            <Ionicons name="gift-outline" size={14} color="#FFFFFF" />
-            <Text style={styles.claimBtnText}>Claim Reward</Text>
-          </TouchableOpacity>
-        )}
       </View>
     );
   };
@@ -120,9 +87,21 @@ const VolunteerRewardsScreen = () => {
             <Text style={[styles.pageLabel, { color: colors.muted, fontFamily: typography.body }]}>Your Earnings</Text>
             <Text style={[styles.pageTitle, { color: colors.text, fontFamily: typography.heading }]}>Rewards</Text>
           </View>
-          <View style={[styles.trophyBadge, { backgroundColor: '#FEF9C3', borderColor: '#FDE68A' }]}>
-            <Text style={styles.trophyEmoji}>🏆</Text>
-            <Text style={[styles.trophyRank, { color: '#92400E' }]}>Rank #4</Text>
+          <View style={styles.headerRight}>
+            <View style={[styles.trophyBadge, { backgroundColor: '#FEF9C3', borderColor: '#FDE68A' }]}> 
+              <Text style={styles.trophyEmoji}>🏆</Text>
+              <Text style={[styles.trophyRank, { color: '#92400E' }]}>Rank #4</Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.profileBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
+              onPress={() => navigation.navigate('VolunteerProfile')}
+            >
+              {profile?.avatar_url ? (
+                <Image source={{ uri: profile.avatar_url }} style={styles.profileAvatar} />
+              ) : (
+                <Ionicons name="person" size={18} color={colors.primary} />
+              )}
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -131,73 +110,52 @@ const VolunteerRewardsScreen = () => {
           <View style={styles.glowCircle1} />
           <View style={styles.glowCircle2} />
           <Text style={styles.summaryLabel}>Total Rewards Earned</Text>
-          <Text style={styles.summaryAmount}>₹{totalEarned}</Text>
+          <Text style={styles.summaryAmount}>₹{stats.totalEarned}</Text>
           <View style={styles.summaryRow}>
             <View style={styles.summaryItem}>
-              <Text style={styles.summaryItemValue}>{resolvedIssues.length}</Text>
+              <Text style={styles.summaryItemValue}>{stats.completedTasks}</Text>
               <Text style={styles.summaryItemLabel}>Tasks Done</Text>
             </View>
             <View style={styles.summaryDivider} />
             <View style={styles.summaryItem}>
-              <Text style={styles.summaryItemValue}>{govRewards.length + publicRewards.length}</Text>
+              <Text style={styles.summaryItemValue}>{rewardHistory.length}</Text>
               <Text style={styles.summaryItemLabel}>Rewards</Text>
             </View>
             <View style={styles.summaryDivider} />
             <View style={styles.summaryItem}>
-              <Text style={styles.summaryItemValue}>1950</Text>
+              <Text style={styles.summaryItemValue}>{stats.xpPoints}</Text>
               <Text style={styles.summaryItemLabel}>XP Points</Text>
             </View>
           </View>
         </View>
 
-        {/* Government Fund Section */}
+        {/* Reward History Section */}
         <View style={styles.sectionHeader}>
           <View style={styles.sectionIconWrap}>
             <Text style={styles.sectionIcon}>🏛️</Text>
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.sectionTitle, { color: colors.text, fontFamily: typography.heading }]}>Government Fund</Text>
+            <Text style={[styles.sectionTitle, { color: colors.text, fontFamily: typography.heading }]}>Reward History</Text>
             <Text style={[styles.sectionSub, { color: colors.muted, fontFamily: typography.body }]}>
-              Municipal civic reward programme
+              Verified mission credits
             </Text>
-          </View>
-          <View style={[styles.sourcePill, { backgroundColor: '#E0F2FE' }]}>
-            <Text style={[styles.sourcePillText, { color: '#0369A1' }]}>₹{govRewards.reduce((s, r) => s + r.amount, 0)}</Text>
           </View>
         </View>
 
-        {govRewards.length === 0 ? (
-          <Text style={[styles.emptyHint, { color: colors.muted }]}>No government rewards yet. Complete tasks to earn.</Text>
+        {loading ? (
+             <ActivityIndicator color={colors.primary} style={{ marginVertical: 20 }} />
+        ) : rewardHistory.length === 0 ? (
+          <Text style={[styles.emptyHint, { color: colors.muted }]}>No rewards earned yet. Complete your first mission!</Text>
         ) : (
-          govRewards.map((r) => <RewardCard key={r.id} item={r} source="gov" />)
-        )}
-
-        {/* Public Fundraise Section */}
-        <View style={[styles.sectionHeader, { marginTop: 20 }]}>
-          <View style={[styles.sectionIconWrap, { backgroundColor: '#F5F3FF' }]}>
-            <Text style={styles.sectionIcon}>🤝</Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.sectionTitle, { color: colors.text, fontFamily: typography.heading }]}>Public Fundraise</Text>
-            <Text style={[styles.sectionSub, { color: colors.muted, fontFamily: typography.body }]}>
-              Community crowd-funded contributions
-            </Text>
-          </View>
-          <View style={[styles.sourcePill, { backgroundColor: '#F5F3FF' }]}>
-            <Text style={[styles.sourcePillText, { color: '#7C3AED' }]}>₹{publicRewards.reduce((s, r) => s + r.amount, 0)}</Text>
-          </View>
-        </View>
-
-        {publicRewards.length === 0 ? (
-          <Text style={[styles.emptyHint, { color: colors.muted }]}>No public fundraise rewards yet.</Text>
-        ) : (
-          publicRewards.map((r) => <RewardCard key={r.id} item={r} source="public" />)
+          rewardHistory.map((r) => <RewardCard key={r.id} item={r} />)
         )}
 
         {/* Leaderboard */}
         <Text style={[styles.lbTitle, { color: colors.text, fontFamily: typography.heading }]}>Top Volunteers</Text>
         <View style={[styles.lbCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          {leaderboard.map((v, idx) => (
+          {leaderboard.length === 0 ? (
+              <Text style={{ textAlign: 'center', padding: 20, color: colors.muted }}>Loading leaderboard...</Text>
+          ) : leaderboard.map((v, idx) => (
             <View key={v.rank}>
               <View style={[styles.lbRow, v.name === 'You' && { backgroundColor: `${colors.primary}18`, borderRadius: 10, padding: 8 }]}>
                 <Text style={[styles.lbRank, { color: v.rank <= 3 ? '#92400E' : colors.muted, fontFamily: typography.heading }]}>
@@ -227,8 +185,11 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1 },
   content: { padding: 16, paddingBottom: 100 },
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   pageLabel: { fontSize: 12, marginBottom: 2 },
   pageTitle: { fontSize: 26, fontWeight: '800' },
+  profileBtn: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
+  profileAvatar: { width: '100%', height: '100%' },
   trophyBadge: {
     borderRadius: 14, borderWidth: 1, padding: 10, alignItems: 'center',
   },

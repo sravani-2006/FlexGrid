@@ -3,10 +3,11 @@ import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import { StyleSheet, View, Platform, Text } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 
-const SEVERITY_COLORS = {
-    critical: '#DC2626',
-    medium: '#F59E0B',
-    low: '#10B981',
+const STATUS_COLORS = {
+    open: '#DC2626',      // Red
+    in_progress: '#F59E0B', // Yellow
+    completed: '#10B981',   // Green
+    resolved: '#10B981',    // Green (fallback)
 };
 
 const MAP_STYLE = [
@@ -26,13 +27,13 @@ const MAP_STYLE = [
     { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#c9c9c9' }] },
 ];
 
-const VolunteerTaskMap = ({
+const VolunteerTaskMap = React.forwardRef(({
     issues,
     selectedIssue,
     onMarkerPress,
     volunteerLocation,
     activeTask,
-}) => {
+}, ref) => {
     if (Platform.OS === 'web') {
         return (
             <View style={styles.webFallback}>
@@ -51,6 +52,7 @@ const VolunteerTaskMap = ({
 
     return (
         <MapView
+            ref={ref}
             provider={PROVIDER_GOOGLE}
             style={styles.map}
             initialRegion={initialRegion}
@@ -68,7 +70,13 @@ const VolunteerTaskMap = ({
             {/* Path to Active Task */}
             {activeTask && volunteerLocation && (
                 <Polyline
-                    coordinates={[volunteerLocation, activeTask.location]}
+                    coordinates={[
+                        volunteerLocation, 
+                        { 
+                            latitude: activeTask.latitude || activeTask.location?.latitude, 
+                            longitude: activeTask.longitude || activeTask.location?.longitude 
+                        }
+                    ]}
                     strokeColor="#4F5D33"
                     strokeWidth={3}
                     lineDashPattern={[5, 5]}
@@ -79,16 +87,22 @@ const VolunteerTaskMap = ({
             {(issues || []).map((issue) => {
                 const isActive = activeTask?.id === issue.id;
                 const isSelected = selectedIssue?.id === issue.id;
+                const coords = {
+                    latitude: issue.latitude || issue.location?.latitude,
+                    longitude: issue.longitude || issue.location?.longitude,
+                };
+
+                if (!coords.latitude || !coords.longitude) return null;
                 
                 return (
                     <Marker
                         key={issue.id}
-                        coordinate={issue.location}
+                        coordinate={coords}
                         onPress={() => onMarkerPress && onMarkerPress(issue)}
                     >
                         <View style={[
                             styles.markerContainer,
-                            { backgroundColor: isSelected ? '#1F1F1D' : SEVERITY_COLORS[issue.severity] || '#4F5D33' },
+                            { backgroundColor: isSelected ? '#1F1F1D' : STATUS_COLORS[issue.status] || '#4F5D33' },
                             isActive && styles.activeMarker
                         ]}>
                             <MaterialCommunityIcons 
@@ -102,7 +116,7 @@ const VolunteerTaskMap = ({
             })}
         </MapView>
     );
-};
+});
 
 const styles = StyleSheet.create({
     map: { flex: 1 },

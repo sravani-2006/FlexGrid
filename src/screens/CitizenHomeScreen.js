@@ -50,7 +50,7 @@ const CitizenHomeScreen = ({ navigation }) => {
     return issues.filter(i => i.user_id === user.id);
   }, [issues, user]);
   
-  const resolvedCount = useMemo(() => myIssues.filter(i => i.status === 'resolved').length, [myIssues]);
+  const resolvedCount = useMemo(() => myIssues.filter(i => i.status === 'resolved' || i.status === 'completed').length, [myIssues]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -184,7 +184,7 @@ const CitizenHomeScreen = ({ navigation }) => {
                         style={[styles.issueCard, { backgroundColor: colors.card, borderColor: colors.border }]}
                         onPress={() => navigation.navigate('IssueDetails', { issue })}
                     >
-                        <View style={[styles.statusLine, { backgroundColor: issue.status === 'resolved' ? '#10B981' : colors.primary }]} />
+                      <View style={[styles.statusLine, { backgroundColor: issue.status === 'resolved' || issue.status === 'completed' ? '#10B981' : colors.primary }]} />
                         <View style={styles.issueInfo}>
                             <Text style={[styles.issueTitle, { color: colors.text }]} numberOfLines={1}>{issue.title}</Text>
                             <View style={styles.issueMeta}>
@@ -192,8 +192,8 @@ const CitizenHomeScreen = ({ navigation }) => {
                                 <Text style={[styles.issueLoc, { color: colors.muted }]}>{issue.location_name || 'Unmarked'}</Text>
                             </View>
                         </View>
-                        <View style={[styles.statusBadge, { backgroundColor: issue.status === 'resolved' ? '#DCFCE7' : colors.primary + '15' }]}>
-                            <Text style={[styles.statusText, { color: issue.status === 'resolved' ? '#15803D' : colors.primary }]}>
+                        <View style={[styles.statusBadge, { backgroundColor: issue.status === 'resolved' || issue.status === 'completed' ? '#DCFCE7' : colors.primary + '15' }]}>
+                          <Text style={[styles.statusText, { color: issue.status === 'resolved' || issue.status === 'completed' ? '#15803D' : colors.primary }]}> 
                                 {issue.status.toUpperCase()}
                             </Text>
                         </View>
@@ -208,7 +208,7 @@ const CitizenHomeScreen = ({ navigation }) => {
                 <Text style={styles.pulseTitle}>Community Pulse</Text>
                 <View style={styles.liveDot} />
             </View>
-            <Text style={styles.pulseSub}>{issues.filter(i => i.status === 'resolved').length} issues resolved in your area this week!</Text>
+            <Text style={styles.pulseSub}>{issues.filter(i => i.status === 'resolved' || i.status === 'completed').length} issues resolved in your area this week!</Text>
             <View style={styles.progressBar}>
                 <View style={[styles.progressFill, { width: '70%', backgroundColor: '#10B981' }]} />
             </View>

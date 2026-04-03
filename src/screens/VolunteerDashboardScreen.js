@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Image,
   RefreshControl,
   StyleSheet,
   Text,
@@ -10,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import EmptyState from '../components/EmptyState';
@@ -17,8 +19,8 @@ import { useToast } from '../context/ToastContext';
 import { useTheme } from '../context/ThemeContext';
 import { useVolunteer } from '../context/VolunteerContext';
 import { useIssues } from '../hooks/useIssues';
+import { useVolunteerStats } from '../hooks/useVolunteerStats';
 import { useAuth } from '../context/AuthContext';
-import { supabase } from '../lib/supabase';
 
 const SEVERITY_COLOR = {
   critical: { bg: '#FEE2E2', text: '#B91C1C' },
@@ -29,41 +31,71 @@ const SEVERITY_COLOR = {
 const STATUS_COLOR = {
   open: { bg: '#EFF6FF', text: '#1D4ED8' },
   in_progress: { bg: '#FFF7ED', text: '#C2410C' },
+  completed: { bg: '#F0FDF4', text: '#15803D' },
   resolved: { bg: '#F0FDF4', text: '#15803D' },
 };
 
 const VolunteerDashboardScreen = ({ navigation }) => {
   const { colors, typography } = useTheme();
   const { showToast } = useToast();
-  const { user } = useAuth();
-  const { activeTask, startTask } = useVolunteer();
+  const { user, profile, refreshProfile } = useAuth();
+  const { activeTask, startTask, acceptTask } = useVolunteer();
   const { issues, loading: issuesLoading, refresh } = useIssues();
+  const { stats: rewardStats, refresh: refreshRewards } = useVolunteerStats();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [refreshing, setRefreshing] = useState(false);
 
+  const normalizeStatus = (status) => (status === 'resolved' ? 'completed' : status);
+  const getDisplayStatus = (issue) => {
+    const raw = activeTask?.id === issue.id && issue.status === 'open' ? 'in_progress' : issue.status;
+    return normalizeStatus(raw);
+  };
+  const getDisplayAssignedTo = (issue) => (activeTask?.id === issue.id && !issue.assigned_to ? user?.id : issue.assigned_to);
+  const filterIssues = (status) => {
+    if (status === 'all') return filteredIssues;
+    if (status === 'completed') {
+      return filteredIssues.filter((i) => getDisplayStatus(i) === 'completed');
+    }
+    return filteredIssues.filter((i) => getDisplayStatus(i) === status);
+  };
+
+  const filteredIssues = useMemo(() => {
+    return issues.filter((i) => {
+      // 1. 'open' for anyone to accept
+      // 2. 'in_progress' or 'completed' ONLY if assigned to the current user
+      const isMine = getDisplayAssignedTo(i) === user?.id;
+      if (activeTask?.id === i.id) return true;
+      if (i.status === 'open') return true;
+      if (isMine) return true;
+      return false;
+    });
+  }, [issues, user?.id, activeTask?.id]);
+
   const data = useMemo(() => {
-    return issues
-      .filter((i) => (statusFilter === 'all' ? true : i.status === statusFilter))
+    return filterIssues(statusFilter)
       .filter((i) => i.title.toLowerCase().includes(search.toLowerCase()));
-  }, [issues, statusFilter, search]);
+  }, [filteredIssues, statusFilter, search, activeTask?.id]);
 
   const stats = useMemo(() => ({
-    accepted: issues.filter(i => i.status === 'in_progress').length,
-    completed: issues.filter((i) => i.status === 'resolved').length,
-    rewards: issues.filter((i) => i.status === 'resolved').reduce((s, i) => {
-      const map = { critical: 800, medium: 500, low: 300 };
-      return s + (map[i.severity] || 300);
-    }, 0),
-  }), [issues]);
+    accepted: issues.filter(i => (getDisplayStatus(i) === 'in_progress') && getDisplayAssignedTo(i) === user?.id).length,
+    completed: issues.filter((i) => (getDisplayStatus(i) === 'completed' || getDisplayStatus(i) === 'resolved') && getDisplayAssignedTo(i) === user?.id).length,
+    rewards: rewardStats?.totalEarned || 0,
+  }), [issues, user?.id, activeTask?.id, rewardStats?.totalEarned]);
 
   const onRefresh = async () => {
     setRefreshing(true);
     await Haptics.selectionAsync();
-    await refresh();
+    await Promise.all([refresh(), refreshRewards()]);
     setRefreshing(false);
     showToast('Volunteer queue refreshed ✅');
   };
+
+  useFocusEffect(
+    React.useCallback(() => {
+      refreshProfile?.();
+    }, [refreshProfile])
+  );
 
   const handleAccept = async (item) => {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -80,37 +112,94 @@ const VolunteerDashboardScreen = ({ navigation }) => {
     }
 
     try {
-        const { error } = await supabase
-            .from('issues')
-            .update({ status: 'in_progress', volunteer_id: user.id })
-            .eq('id', item.id);
-            
-        if (error) throw error;
+        console.log('[VolunteerDashboard] Attempting to accept task:', item.id);
         
-        startTask(item);
+        if (!user?.id) {
+          showToast('User not found. Please log in again.', 'error');
+          return;
+        }
+
+        await acceptTask(item.id);
+        
+        startTask({ ...item, status: 'in_progress', assigned_to: user.id });
+        await Promise.all([refresh(), refreshRewards()]);
         showToast(`Mission Started: ${item.title}`);
         navigation.navigate('Map');
     } catch (e) {
-        showToast('Failed to accept task', 'error');
+        console.error('[VolunteerDashboard] Acceptance Exception:', e);
+        showToast(`Failed to accept: ${e.message || 'Database error'}`, 'error');
     }
   };
 
   const renderItem = ({ item }) => {
+    const displayStatus = getDisplayStatus(item);
+    const displayAssignedTo = getDisplayAssignedTo(item);
     const sev = SEVERITY_COLOR[item.severity] || SEVERITY_COLOR.low;
-    const sta = STATUS_COLOR[item.status] || STATUS_COLOR.open;
+    const sta = STATUS_COLOR[displayStatus] || STATUS_COLOR.open;
+    const isAssignedToMe = displayAssignedTo === user?.id;
+    const isMyActiveTask = activeTask?.id === item.id;
+
+    let actionLabel = 'Unavailable';
+    let actionDisabled = true;
+    let actionIcon = 'close-circle-outline';
+    let actionColor = colors.border;
+    let actionTextColor = colors.muted;
+
+    if (displayStatus === 'open') {
+      actionLabel = 'Accept Task';
+      actionDisabled = !!activeTask;
+      actionIcon = 'hand-right-outline';
+      actionColor = actionDisabled ? colors.border : colors.primary;
+      actionTextColor = actionDisabled ? colors.muted : '#FFFFFF';
+    } else if (displayStatus === 'in_progress' && isAssignedToMe) {
+      actionLabel = 'Upload Proof';
+      actionDisabled = false;
+      actionIcon = 'cloud-upload-outline';
+      actionColor = '#10B981';
+      actionTextColor = '#FFFFFF';
+    } else if (displayStatus === 'completed') {
+      actionLabel = 'Task Completed';
+      actionDisabled = true;
+      actionIcon = 'checkmark-done-outline';
+      actionColor = '#D1FAE5';
+      actionTextColor = '#065F46';
+    }
+
+    const handlePrimaryAction = async () => {
+      if (displayStatus === 'open') {
+        await handleAccept(item);
+        return;
+      }
+
+      if (displayStatus === 'in_progress' && isAssignedToMe) {
+        navigation.navigate('IssueDetails', {
+          issue: {
+            ...item,
+            status: displayStatus,
+            assigned_to: displayAssignedTo,
+          },
+        });
+      }
+    };
 
     return (
       <TouchableOpacity
         style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
         activeOpacity={0.85}
-        onPress={() => navigation.navigate('IssueDetails', { issue: item })}
+        onPress={() => navigation.navigate('IssueDetails', {
+          issue: {
+            ...item,
+            status: displayStatus,
+            assigned_to: displayAssignedTo,
+          },
+        })}
       >
         <View style={styles.cardTopRow}>
           <View style={[styles.severityBadge, { backgroundColor: sev.bg }]}>
             <Text style={[styles.severityText, { color: sev.text }]}>{item.severity?.toUpperCase()}</Text>
           </View>
           <View style={[styles.statusBadge, { backgroundColor: sta.bg }]}>
-            <Text style={[styles.statusText, { color: sta.text }]}>{item.status?.replace('_', ' ')}</Text>
+            <Text style={[styles.statusText, { color: sta.text }]}>{displayStatus?.replace('_', ' ')}</Text>
           </View>
         </View>
 
@@ -134,19 +223,19 @@ const VolunteerDashboardScreen = ({ navigation }) => {
           <TouchableOpacity
             style={[
               styles.actionBtn,
-              { backgroundColor: (activeTask?.id === item.id || item.status !== 'open') ? colors.border : colors.primary },
+              { backgroundColor: actionColor },
             ]}
-            onPress={() => item.status === 'open' && handleAccept(item)}
+            onPress={handlePrimaryAction}
             activeOpacity={0.8}
-            disabled={item.status !== 'open'}
+            disabled={actionDisabled}
           >
             <Ionicons
-              name={activeTask?.id === item.id ? 'run-fast' : 'hand-right-outline'}
+              name={actionIcon}
               size={14}
-              color={(activeTask?.id === item.id || item.status !== 'open') ? colors.muted : '#FFFFFF'}
+              color={actionTextColor}
             />
-            <Text style={[styles.actionBtnText, { color: (activeTask?.id === item.id || item.status !== 'open') ? colors.muted : '#FFFFFF' }]}>
-              {activeTask?.id === item.id ? 'Active Mission' : item.status === 'open' ? 'Accept Task' : 'Unavailable'}
+            <Text style={[styles.actionBtnText, { color: actionTextColor }]}> 
+              {actionLabel}
             </Text>
           </TouchableOpacity>
 
@@ -154,12 +243,18 @@ const VolunteerDashboardScreen = ({ navigation }) => {
             style={[styles.actionBtn, styles.proofBtn]}
             onPress={async () => {
               await Haptics.selectionAsync();
-              navigation.navigate('IssueDetails', { issue: item });
+              navigation.navigate('IssueDetails', {
+                issue: {
+                  ...item,
+                  status: displayStatus,
+                  assigned_to: displayAssignedTo,
+                },
+              });
             }}
             activeOpacity={0.8}
           >
-            <Ionicons name="cloud-upload-outline" size={14} color="#047857" />
-            <Text style={[styles.actionBtnText, { color: '#047857' }]}>Upload Proof</Text>
+            <Ionicons name="eye-outline" size={14} color="#047857" />
+            <Text style={[styles.actionBtnText, { color: '#047857' }]}>View Details</Text>
           </TouchableOpacity>
         </View>
       </TouchableOpacity>
@@ -187,7 +282,11 @@ const VolunteerDashboardScreen = ({ navigation }) => {
                 style={[styles.avatarBtn, { backgroundColor: colors.primary }]}
                 onPress={() => navigation.navigate('VolunteerProfile')}
               >
-                <Ionicons name="person" size={16} color="#FFFFFF" />
+                {profile?.avatar_url ? (
+                  <Image source={{ uri: profile.avatar_url }} style={styles.avatarImage} />
+                ) : (
+                  <Ionicons name="person" size={16} color="#FFFFFF" />
+                )}
               </TouchableOpacity>
             </View>
 
@@ -249,7 +348,7 @@ const VolunteerDashboardScreen = ({ navigation }) => {
             </View>
 
             <View style={styles.filterRow}>
-              {['all', 'open', 'in_progress', 'resolved'].map((f) => (
+              {['all', 'open', 'in_progress', 'completed'].map((f) => (
                 <TouchableOpacity
                   key={f}
                   style={[
@@ -262,7 +361,7 @@ const VolunteerDashboardScreen = ({ navigation }) => {
                   }}
                 >
                   <Text style={[styles.chipText, { color: statusFilter === f ? '#FFFFFF' : colors.muted, fontFamily: typography.label }]}>
-                    {f === 'all' ? 'All' : f.replace('_', ' ')}
+                    {f === 'all' ? 'All' : f === 'completed' ? 'Resolved' : f.replace('_', ' ')}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -291,7 +390,8 @@ const styles = StyleSheet.create({
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
   greeting: { fontSize: 12, marginBottom: 2 },
   title: { fontSize: 26, fontWeight: '800' },
-  avatarBtn: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
+  avatarBtn: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  avatarImage: { width: '100%', height: '100%' },
   statsBar: {
     flexDirection: 'row',
     borderRadius: 16,

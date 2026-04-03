@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 
@@ -25,13 +26,23 @@ const HomeScreen = ({ navigation }) => {
 
         <View style={styles.bottomSection}>
           <TouchableOpacity
-            style={[styles.button, { backgroundColor: colors.primary }]}
+            style={[styles.button, { backgroundColor: colors.primary, marginBottom: 12 }]}
             onPress={() => navigation.navigate('CitizenLogin')}
           >
+            <Ionicons name="person-outline" size={20} color="#FFFFFF" />
             <Text style={[styles.btnTitle, { color: '#FFFFFF', fontFamily: typography.heading }]}>
-              Get Started
+              Citizen Portal
             </Text>
-            <Ionicons name="arrow-forward" size={20} color="#FFFFFF" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.button, { backgroundColor: 'transparent', borderColor: colors.primary, borderWidth: 2 }]}
+            onPress={() => navigation.navigate('AdminLogin')}
+          >
+            <Ionicons name="school-outline" size={20} color={colors.primary} />
+            <Text style={[styles.btnTitle, { color: colors.primary, fontFamily: typography.heading }]}>
+              Volunteer Portal
+            </Text>
           </TouchableOpacity>
 
           <Text style={[styles.secureText, { color: colors.muted, fontFamily: typography.body }]}>

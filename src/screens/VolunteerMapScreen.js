@@ -1,5 +1,7 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { SafeAreaView, StyleSheet, Text, TouchableOpacity, View, Linking, Platform, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { StyleSheet, Text, TouchableOpacity, View, Linking, Platform, ActivityIndicator, Image } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import VolunteerTaskMap from '../components/VolunteerTaskMap';
@@ -7,21 +9,44 @@ import { useToast } from '../context/ToastContext';
 import { useTheme } from '../context/ThemeContext';
 import { useVolunteer } from '../context/VolunteerContext';
 import { useIssues } from '../hooks/useIssues';
+import { useAuth } from '../context/AuthContext';
 
 const VolunteerMapScreen = ({ navigation }) => {
     const { colors, typography } = useTheme();
     const { showToast } = useToast();
+    const { profile, refreshProfile } = useAuth();
     const { activeTask, sessionStats, volunteerLocation } = useVolunteer();
     const { issues, loading: issuesLoading } = useIssues();
     const [selectedIssue, setSelectedIssue] = useState(null);
+    const mapRef = useRef(null);
 
     useEffect(() => {
         if (activeTask) {
             // Find the latest version of the active task from Supabase issues
             const latest = issues.find(i => i.id === activeTask.id);
-            setSelectedIssue(latest || activeTask);
+            const target = latest || activeTask;
+            setSelectedIssue(target);
+
+            // Auto-focus the map on the active task
+            const lat = target.latitude || target.location?.latitude;
+            const lng = target.longitude || target.location?.longitude;
+
+            if (lat && lng && mapRef.current) {
+                mapRef.current.animateToRegion({
+                    latitude: lat,
+                    longitude: lng,
+                    latitudeDelta: 0.015,
+                    longitudeDelta: 0.015,
+                }, 1000);
+            }
         }
     }, [activeTask, issues]);
+
+    useFocusEffect(
+        React.useCallback(() => {
+            refreshProfile?.();
+        }, [refreshProfile])
+    );
 
     const openNavigation = async () => {
         if (!selectedIssue) return;
@@ -59,17 +84,30 @@ const VolunteerMapScreen = ({ navigation }) => {
                         {activeTask ? 'Active Mission in Progress' : 'Scanning for nearby complaints'}
                     </Text>
                 </View>
-                {activeTask && (
-                    <View style={styles.liveIndicator}>
-                        <View style={styles.liveDot} />
-                        <Text style={styles.liveText}>TRACKING LIVE</Text>
-                    </View>
-                )}
+                <View style={styles.headerRight}>
+                    {activeTask && (
+                        <View style={styles.liveIndicator}>
+                            <View style={styles.liveDot} />
+                            <Text style={styles.liveText}>TRACKING LIVE</Text>
+                        </View>
+                    )}
+                    <TouchableOpacity
+                        style={[styles.profileBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
+                        onPress={() => navigation.navigate('VolunteerProfile')}
+                    >
+                        {profile?.avatar_url ? (
+                            <Image source={{ uri: profile.avatar_url }} style={styles.profileAvatar} />
+                        ) : (
+                            <Ionicons name="person" size={18} color={colors.primary} />
+                        )}
+                    </TouchableOpacity>
+                </View>
             </View>
 
             <View style={styles.mapContainer}>
                 {issuesLoading && <ActivityIndicator style={styles.loader} color={colors.primary} />}
                 <VolunteerTaskMap
+                    ref={mapRef}
                     issues={issues}
                     selectedIssue={selectedIssue}
                     onMarkerPress={setSelectedIssue}
@@ -158,11 +196,14 @@ const VolunteerMapScreen = ({ navigation }) => {
 const styles = StyleSheet.create({
     safeArea: { flex: 1 },
     header: { padding: 18, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+    headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     title: { fontSize: 24, fontWeight: '800' },
     subtitle: { fontSize: 13, marginTop: 4 },
     liveIndicator: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FEF2F2', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
     liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#DC2626' },
     liveText: { fontSize: 10, fontWeight: '800', color: '#DC2626' },
+    profileBtn: { width: 38, height: 38, borderRadius: 19, borderWidth: 1, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+    profileAvatar: { width: '100%', height: '100%' },
     mapContainer: { flex: 1, marginHorizontal: 16, borderRadius: 20, overflow: 'hidden', borderWidth: 1, borderColor: '#D1D5DB' },
     loader: { position: 'absolute', top: 20, right: 20, zIndex: 10 },
     statsOverlay: {

@@ -46,5 +46,5 @@ export const useIssues = () => {
     };
   }, []);
 
-  return { issues, loading, error, refresh: fetchIssues };
+  return { issues, loading, error, fetchIssues, refresh: fetchIssues };
 };

@@ -19,7 +19,7 @@ import VolunteerDashboardScreen from '../screens/VolunteerDashboardScreen';
 import VolunteerRewardsScreen from '../screens/VolunteerRewardsScreen';
 import VolunteerProfileScreen from '../screens/VolunteerProfileScreen';
 import VolunteerMapScreen from '../screens/VolunteerMapScreen';
-import IssueDetailsScreen from '../screens/IssueDetailsScreen';
+import ComplaintDetailsScreen from '../screens/ComplaintDetailsScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -89,7 +89,7 @@ const VolunteerTabNavigator = () => {
 
 const AppNavigator = () => {
   const { isDark, colors, typography } = useTheme();
-  const { user, role, loading } = useAuth();
+  const { user, role, activePortal, loading } = useAuth();
 
   const navigationTheme = {
     ...DefaultTheme,
@@ -119,6 +119,17 @@ const AppNavigator = () => {
     );
   }
 
+  const portal = activePortal || role;
+
+  // Avoid routing flicker while portal/role is still being resolved.
+  if (user && !portal) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+
   return (
     <NavigationContainer theme={navigationTheme}>
       <Stack.Navigator
@@ -137,7 +148,7 @@ const AppNavigator = () => {
           </>
         ) : (
           <>
-            {role === 'volunteer' || role === 'admin' ? (
+            {portal === 'volunteer' || role === 'admin' ? (
               <>
                 <Stack.Screen name="AdminApp" component={VolunteerTabNavigator} options={{ headerShown: false }} />
                 <Stack.Screen name="VolunteerProfile" component={VolunteerProfileScreen} options={{ headerShown: false }} />
@@ -148,7 +159,7 @@ const AppNavigator = () => {
                 <Stack.Screen name="CitizenProfile" component={CitizenProfileScreen} options={{ headerShown: false }} />
               </>
             )}
-            <Stack.Screen name="IssueDetails" component={IssueDetailsScreen} options={{ title: 'Complaint Details' }} />
+            <Stack.Screen name="IssueDetails" component={ComplaintDetailsScreen} options={{ title: 'Complaint Details' }} />
           </>
         )}
       </Stack.Navigator>

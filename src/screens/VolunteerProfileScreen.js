@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Alert,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Switch,
@@ -8,7 +9,6 @@ import {
   TouchableOpacity,
   View,
   Image,
-  Button,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -19,6 +19,7 @@ import { useAuth } from '../context/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { pickImage, uploadImage } from '../utils/storage';
+import { useVolunteerStats } from '../hooks/useVolunteerStats';
 
 const BADGES = [
   { id: 'b1', icon: '🔧', label: 'First Fix', desc: 'Resolved your first complaint', earned: true },
@@ -29,39 +30,67 @@ const BADGES = [
   { id: 'b6', icon: '💎', label: 'Diamond Fixer', desc: 'Completed 50 tasks', earned: false },
 ];
 
-const IMPACT_STATS = [
-  { icon: 'hammer-outline', label: 'Issues Fixed', value: '7', color: '#4F5D33' },
-  { icon: 'cash-outline', label: 'Rewards Earned', value: '₹3,800', color: '#047857' },
-  { icon: 'time-outline', label: 'Avg Response', value: '1.4h', color: '#1D4ED8' },
-  { icon: 'thumbs-up-outline', label: 'Upvotes Received', value: '42', color: '#7C3AED' },
-];
-
 const VolunteerProfileScreen = ({ navigation }) => {
   const { colors, typography, toggleTheme, isDark } = useTheme();
   const { showToast } = useToast();
-  const { logout } = useAuth();
+  const { logout, user, profile: authProfile, refreshProfile } = useAuth();
   const [notificationsOn, setNotificationsOn] = useState(true);
   const [profile, setProfile] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const { stats, refresh: refreshStats } = useVolunteerStats();
+
+  const impactStats = [
+    { icon: 'hammer-outline', label: 'Issues Fixed', value: `${stats.completedTasks || 0}`, color: '#4F5D33' },
+    { icon: 'cash-outline', label: 'Rewards Earned', value: `₹${(stats.totalEarned || 0).toLocaleString('en-IN')}`, color: '#047857' },
+    { icon: 'trophy-outline', label: 'Volunteer Rank', value: stats.rank || 'Unranked', color: '#1D4ED8' },
+    { icon: 'flash-outline', label: 'XP Points', value: `${stats.xpPoints || 0}`, color: '#7C3AED' },
+  ];
 
   useEffect(() => {
-    const fetchProfile = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
+    const fetchProfileData = async () => {
+      const { data: { user: sessionUser } } = await supabase.auth.getUser();
+      if (sessionUser) {
         const { data } = await supabase
           .from('profiles')
           .select('*')
-          .eq('id', user.id)
+          .eq('id', sessionUser.id)
           .single();
         if (data) setProfile(data);
       }
     };
 
-    fetchProfile();
+    fetchProfileData();
     
     AsyncStorage.getItem('@settings_notifications').then(val => {
       if (val !== null) setNotificationsOn(val === 'true');
     });
   }, []);
+
+  useEffect(() => {
+    if (authProfile) {
+      setProfile((prev) => ({ ...(prev || {}), ...authProfile }));
+    }
+  }, [authProfile]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await refreshProfile();
+      await refreshStats();
+
+      const { data: { user: sessionUser } } = await supabase.auth.getUser();
+      if (sessionUser) {
+        const { data } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', sessionUser.id)
+          .single();
+        if (data) setProfile(data);
+      }
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const handleUpload = async () => {
     const uri = await pickImage();
@@ -83,6 +112,7 @@ const VolunteerProfileScreen = ({ navigation }) => {
 
       if (!error) {
         setProfile(prev => ({ ...prev, avatar_url: url }));
+        await refreshProfile();
       }
     }
   };
@@ -108,7 +138,11 @@ const VolunteerProfileScreen = ({ navigation }) => {
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={['top']}>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+      >
 
         {/* Header */}
         <View style={styles.headerRow}>
@@ -134,36 +168,40 @@ const VolunteerProfileScreen = ({ navigation }) => {
               )}
             </View>
           </View>
-          <View style={{ marginBottom: 10 }}>
-             <Button title="Update photo" onPress={handleUpload} color={colors.primary} />
-          </View>
+          <TouchableOpacity
+            style={[styles.photoBtn, { backgroundColor: colors.primary }]}
+            onPress={handleUpload}
+          >
+            <Ionicons name="camera-outline" size={14} color="#FFFFFF" />
+            <Text style={[styles.photoBtnText, { fontFamily: typography.label }]}>Update Photo</Text>
+          </TouchableOpacity>
           <Text style={[styles.volunteerName, { color: colors.text, fontFamily: typography.heading }]}>
-            Student Volunteer
+            {profile?.full_name || user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Volunteer'}
           </Text>
           <Text style={[styles.volunteerCollege, { color: colors.muted, fontFamily: typography.body }]}>
-            FixGrid Campus Chapter
+            {profile?.college || 'FixGrid Campus Chapter'}
           </Text>
           <View style={styles.idRow}>
             <MaterialCommunityIcons name="id-card" size={14} color={colors.muted} />
             <Text style={[styles.volunteerID, { color: colors.muted, fontFamily: typography.mono }]}>
-              ID: VOL-2026-001
+              ID: {profile?.volunteer_id || `VOL-${(user?.id || '000000').slice(0, 8).toUpperCase()}`}
             </Text>
           </View>
           <View style={[styles.joinedPill, { backgroundColor: colors.background }]}>
             <Ionicons name="calendar-outline" size={12} color={colors.muted} />
             <Text style={[styles.joinedText, { color: colors.muted, fontFamily: typography.body }]}>
-              Joined March 2026
+              Joined {new Date(user?.created_at || Date.now()).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
             </Text>
           </View>
           <View style={[styles.rankBadge, { backgroundColor: `${colors.primary}18` }]}>
-            <Text style={[styles.rankText, { color: colors.primary, fontFamily: typography.label }]}>⭐ Rank #4 Volunteer</Text>
+            <Text style={[styles.rankText, { color: colors.primary, fontFamily: typography.label }]}>⭐ Rank {stats.rank || 'Unranked'} Volunteer</Text>
           </View>
         </View>
 
         {/* Impact Stats */}
         <Text style={[styles.sectionTitle, { color: colors.text, fontFamily: typography.heading }]}>My Impact</Text>
         <View style={styles.statsGrid}>
-          {IMPACT_STATS.map((s) => (
+          {impactStats.map((s) => (
             <View key={s.label} style={[styles.statCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <View style={[styles.statIconWrap, { backgroundColor: `${s.color}18` }]}>
                 <Ionicons name={s.icon} size={20} color={s.color} />
@@ -304,6 +342,16 @@ const styles = StyleSheet.create({
   avatarInitials: { color: '#FFFFFF', fontSize: 24, fontWeight: '800' },
   volunteerName: { fontSize: 20, fontWeight: '800' },
   volunteerCollege: { fontSize: 12, marginTop: 4 },
+  photoBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 10,
+  },
+  photoBtnText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
   idRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6 },
   volunteerID: { fontSize: 12 },
   joinedPill: { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5, marginTop: 10 },

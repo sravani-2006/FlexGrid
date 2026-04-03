@@ -11,10 +11,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useToast } from '../context/ToastContext';
-import * as Haptics from 'expo-haptics';
 
 const VolunteerLoginScreen = ({ navigation }) => {
   const [mode, setMode] = useState('signin');
@@ -25,28 +25,18 @@ const VolunteerLoginScreen = ({ navigation }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const { signIn, signUp, signInWithGoogle } = useAuth();
+  const { signIn, signUp } = useAuth();
   const { colors, typography } = useTheme();
   const { showToast } = useToast();
-
-  const handleGoogleSignIn = async () => {
-    try {
-      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      await signInWithGoogle('volunteer');
-      showToast('Redirecting to Google...', 'info');
-    } catch (e) {
-      showToast(e.message || 'Google Sign-In failed', 'error');
-    }
-  };
 
   const handleSubmit = async () => {
     await Haptics.selectionAsync();
 
-    // Basic Validation
-    if (!email || !password || (mode === 'signup' && (!name || !confirmPassword))) {
+    if (!email.trim() || !password.trim() || (mode === 'signup' && (!name.trim() || !confirmPassword.trim()))) {
       showToast('Please fill all required fields', 'error');
       return;
     }
+
     if (mode === 'signup' && password !== confirmPassword) {
       showToast('Passwords do not match', 'error');
       return;
@@ -55,17 +45,17 @@ const VolunteerLoginScreen = ({ navigation }) => {
     setLoading(true);
     try {
       if (mode === 'signup') {
-         await signUp(email, password, name, 'volunteer');
-         showToast('Account created successfully! Check your email to confirm.', 'success');
+        await signUp(email.trim().toLowerCase(), password, name.trim(), 'volunteer');
+        showToast('Volunteer account created. Check your email if confirmation is enabled.', 'success');
       } else {
-         await signIn(email, password, 'volunteer');
-         showToast('Signed in successfully', 'success');
+        await signIn(email.trim().toLowerCase(), password, 'volunteer');
+        showToast('Volunteer sign-in successful', 'success');
       }
     } catch (error) {
-       console.log('[VolunteerLogin] Error:', error.message);
-       showToast(error.message, 'error');
+      console.log('[VolunteerLogin] Auth Error:', error.message);
+      showToast(error.message || 'Volunteer authentication failed', 'error');
     } finally {
-       setLoading(false);
+      setLoading(false);
     }
   };
 
@@ -89,36 +79,22 @@ const VolunteerLoginScreen = ({ navigation }) => {
         </View>
 
         <Text style={[styles.label, { color: colors.primary, fontFamily: typography.label }]}>Volunteer Portal</Text>
-        <Text style={[styles.heading, { color: colors.text, fontFamily: typography.display }]}>Start Your Mission</Text>
-        <Text style={[styles.subheading, { color: colors.muted, fontFamily: typography.body }]}>Join forces to solve issues and earn specialized rewards.</Text>
+        <Text style={[styles.heading, { color: colors.text, fontFamily: typography.display }]}>Volunteer Sign In</Text>
+        <Text style={[styles.subheading, { color: colors.muted, fontFamily: typography.body }]}>Sign in with your volunteer account, or create one to access the operations dashboard.</Text>
 
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}> 
-          <TouchableOpacity 
-            style={[styles.oauthBtn, { backgroundColor: '#FFFFFF', borderColor: '#E2E8F0' }]} 
-            onPress={handleGoogleSignIn}
-          >
-            <Ionicons name="logo-google" size={20} color="#EA4335" />
-            <Text style={[styles.oauthText, { color: '#000', fontFamily: typography.label }]}>Continue with Google</Text>
-          </TouchableOpacity>
-
-          <View style={styles.dividerRow}>
-            <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
-            <Text style={[styles.dividerText, { color: colors.muted, fontFamily: typography.label }]}>OR EMAIL</Text>
-            <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
-          </View>
-
-          <View style={[styles.switchWrap, { backgroundColor: colors.background, borderColor: colors.border }]}> 
-            <TouchableOpacity
-              style={[styles.switchBtn, mode === 'signup' && styles.switchBtnActive]}
-              onPress={() => setMode('signup')}
-            >
-              <Text style={[styles.switchText, { color: colors.muted, fontFamily: typography.label }, mode === 'signup' && { color: colors.text }]}>Sign Up</Text>
-            </TouchableOpacity>
+          <View style={[styles.switchWrap, { backgroundColor: colors.background, borderColor: colors.border }]}>
             <TouchableOpacity
               style={[styles.switchBtn, mode === 'signin' && styles.switchBtnActive]}
               onPress={() => setMode('signin')}
             >
               <Text style={[styles.switchText, { color: colors.muted, fontFamily: typography.label }, mode === 'signin' && { color: colors.text }]}>Sign In</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.switchBtn, mode === 'signup' && styles.switchBtnActive]}
+              onPress={() => setMode('signup')}
+            >
+              <Text style={[styles.switchText, { color: colors.muted, fontFamily: typography.label }, mode === 'signup' && { color: colors.text }]}>Sign Up</Text>
             </TouchableOpacity>
           </View>
 
@@ -180,9 +156,11 @@ const VolunteerLoginScreen = ({ navigation }) => {
              disabled={loading}
           >
             <Text style={[styles.submitText, { fontFamily: typography.heading }]}>
-              {loading ? 'Processing...' : (mode === 'signup' ? 'Create Account' : 'Sign In')}
+              {loading ? 'Processing...' : mode === 'signup' ? 'Create Volunteer Account' : 'Enter Volunteer Portal'}
             </Text>
           </TouchableOpacity>
+
+          <Text style={[styles.infoText, { color: colors.muted, fontFamily: typography.body }]}>Volunteer accounts enter the volunteer portal only.</Text>
 
         </View>
 
@@ -209,12 +187,7 @@ const styles = StyleSheet.create({
   heading: { fontSize: 36, fontWeight: '900', lineHeight: 40 },
   subheading: { fontSize: 14, color: '#64748B', marginTop: 10, marginBottom: 20 },
   card: { borderRadius: 24, padding: 20, borderWidth: 1 },
-  oauthBtn: { borderRadius: 16, borderWidth: 1, padding: 16, flexDirection: 'row', gap: 12, alignItems: 'center', justifyContent: 'center' },
-  oauthText: { fontSize: 16, fontWeight: '700' },
-  dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 20 },
-  dividerLine: { flex: 1, height: 1 },
-  dividerText: { fontSize: 10, letterSpacing: 1.5, fontWeight: '700' },
-  switchWrap: { borderWidth: 1, borderRadius: 999, padding: 4, flexDirection: 'row', marginBottom: 18 },
+  switchWrap: { borderWidth: 1, borderRadius: 999, padding: 4, flexDirection: 'row', marginBottom: 10 },
   switchBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 999 },
   switchBtnActive: { backgroundColor: '#FFFFFF' },
   switchText: { fontSize: 14, fontWeight: '600' },
@@ -224,6 +197,7 @@ const styles = StyleSheet.create({
   inputControl: { flex: 1, fontSize: 14 },
   submitBtn: { borderRadius: 16, padding: 16, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
   submitText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+  infoText: { fontSize: 12, marginTop: 12, textAlign: 'center' },
   adminLink: { textAlign: 'center', fontSize: 14, marginTop: 30, fontWeight: '600' },
 });
 

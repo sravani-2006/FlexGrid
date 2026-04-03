@@ -4,7 +4,6 @@ import {
   FlatList,
   Image,
   RefreshControl,
-  SafeAreaView,
   StyleSheet,
   Text,
   TextInput,
@@ -14,6 +13,7 @@ import {
   StatusBar,
   Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native'; // Added for auto-refresh
 import * as Haptics from 'expo-haptics';

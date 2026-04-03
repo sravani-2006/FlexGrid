@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,6 +12,7 @@ import {
   Image,
   Alert,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
@@ -106,9 +106,11 @@ const ReportIssueScreen = ({ navigation }) => {
       { key: 'Water', icon: 'water', label: 'Water' },
       { key: 'Power', icon: 'flash', label: 'Power' },
       { key: 'Road', icon: 'construct', label: 'Road' },
+      { key: 'Other', icon:'', label: 'Other' },
       { key: 'Drainage', icon: 'build', label: 'Drainage' },
       { key: 'Garbage', icon: 'trash', label: 'Garbage' },
       { key: 'Streetlight', icon: 'bulb', label: 'Light' },
+      
     ],
     []
   );
@@ -232,7 +234,7 @@ const ReportIssueScreen = ({ navigation }) => {
 
   const pickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [4, 3],
       quality: 1,
